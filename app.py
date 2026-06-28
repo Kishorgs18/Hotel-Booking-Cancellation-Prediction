@@ -2,11 +2,9 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import joblib
+import json
 import plotly.express as px
 import plotly.graph_objects as go
-from sklearn.metrics import confusion_matrix, classification_report, roc_curve, auc
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -20,36 +18,18 @@ st.set_page_config(
 # ── Load artifacts ─────────────────────────────────────────────────────────────
 @st.cache_resource
 def load_model():
-    model   = joblib.load("model.pkl")
-    cols    = joblib.load("feature_columns.pkl")
-    encoders= joblib.load("label_encoders.pkl")
+    model    = joblib.load("model.pkl")
+    cols     = joblib.load("feature_columns.pkl")
+    encoders = joblib.load("label_encoders.pkl")
     return model, cols, encoders
 
 @st.cache_data
-def load_and_preprocess():
-    df = pd.read_csv("hotel_bookings.csv")
-    DROP = ["reservation_status","reservation_status_date","agent","company",
-            "arrival_date_year","arrival_date_week_number","arrival_date_day_of_month"]
-    df.drop(columns=[c for c in DROP if c in df.columns], inplace=True)
-    df = df[~((df["adults"]==0)&(df["children"]==0)&(df["babies"]==0))]
-    df["children"].fillna(0, inplace=True)
-    df["country"].fillna(df["country"].mode()[0], inplace=True)
-    df.fillna(0, inplace=True)
-    df["total_nights"]    = df["stays_in_week_nights"] + df["stays_in_weekend_nights"]
-    df["total_guests"]    = df["adults"] + df["children"] + df["babies"]
-    df["is_family"]       = ((df["adults"]>0)&(df["children"]>0)).astype(int)
-    df["room_changed"]    = (df["reserved_room_type"]!=df["assigned_room_type"]).astype(int)
-    df["is_weekend_only"] = ((df["stays_in_weekend_nights"]>0)&(df["stays_in_week_nights"]==0)).astype(int)
-    df["revenue"]         = df["adr"] * df["total_nights"]
-    df["lead_time_log"]   = np.log1p(df["lead_time"])
-    df["adr_log"]         = np.log1p(df["adr"])
-    month_order = ["January","February","March","April","May","June",
-                   "July","August","September","October","November","December"]
-    df["arrival_month_num"] = df["arrival_date_month"].map({m:i+1 for i,m in enumerate(month_order)})
-    return df
+def load_eda():
+    with open("eda_summary.json") as f:
+        return json.load(f)
 
 model, feature_cols, label_encoders = load_model()
-df_raw = load_and_preprocess()
+eda = load_eda()
 
 # ── Sidebar ────────────────────────────────────────────────────────────────────
 st.sidebar.image("https://img.icons8.com/fluency/96/hotel.png", width=80)
@@ -71,27 +51,24 @@ if page == "🏠 Overview & EDA":
     st.markdown("Analysing **119,390 hotel bookings** to understand what drives cancellations.")
 
     # KPI row
-    total     = len(df_raw)
-    cancelled = df_raw["is_canceled"].sum()
-    rate      = cancelled / total
-    avg_lead  = df_raw["lead_time"].mean()
-    avg_adr   = df_raw["adr"].mean()
+    total    = eda["total"]
+    cancelled= eda["cancelled"]
+    rate     = cancelled / total
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Total Bookings",       f"{total:,}")
     c2.metric("Cancellations",        f"{cancelled:,}", f"{rate:.1%} of total")
-    c3.metric("Avg Lead Time (days)", f"{avg_lead:.0f}")
-    c4.metric("Avg Daily Rate (£)",   f"£{avg_adr:.2f}")
+    c3.metric("Avg Lead Time (days)", f"{eda['avg_lead_time']:.0f}")
+    c4.metric("Avg Daily Rate (£)",   f"£{eda['avg_adr']:.2f}")
 
     st.markdown("---")
 
-    # Row 1: cancellation by hotel type + by month
+    # Row 1: by hotel + by month
     col1, col2 = st.columns(2)
 
     with col1:
         st.subheader("Cancellation Rate by Hotel Type")
-        htype = df_raw.groupby("hotel")["is_canceled"].mean().reset_index()
-        htype.columns = ["Hotel Type", "Cancellation Rate"]
+        htype = pd.DataFrame(eda["by_hotel"].items(), columns=["Hotel Type","Cancellation Rate"])
         fig = px.bar(htype, x="Hotel Type", y="Cancellation Rate",
                      color="Hotel Type", text_auto=".1%",
                      color_discrete_sequence=["#636EFA","#EF553B"])
@@ -100,45 +77,41 @@ if page == "🏠 Overview & EDA":
 
     with col2:
         st.subheader("Cancellation Rate by Month")
-        month_order = ["January","February","March","April","May","June",
-                       "July","August","September","October","November","December"]
-        monthly = df_raw.groupby("arrival_date_month")["is_canceled"].mean().reindex(month_order).reset_index()
-        monthly.columns = ["Month", "Cancellation Rate"]
+        monthly = pd.DataFrame(eda["by_month"].items(), columns=["Month","Cancellation Rate"])
         fig = px.line(monthly, x="Month", y="Cancellation Rate",
                       markers=True, color_discrete_sequence=["#00CC96"])
         fig.update_layout(yaxis_tickformat=".0%")
         st.plotly_chart(fig, use_container_width=True)
 
-    # Row 2: lead time distribution + deposit type
+    # Row 2: lead time box + deposit
     col3, col4 = st.columns(2)
 
     with col3:
         st.subheader("Lead Time vs Cancellation")
-        sample = df_raw.sample(min(5000, len(df_raw)), random_state=42)
-        fig = px.box(sample, x="is_canceled", y="lead_time",
-                     labels={"is_canceled": "Cancelled (1=Yes)", "lead_time": "Lead Time (days)"},
+        lead_df = pd.DataFrame(eda["lead_sample"], columns=["lead_time","is_canceled"])
+        fig = px.box(lead_df, x="is_canceled", y="lead_time",
+                     labels={"is_canceled":"Cancelled (1=Yes)","lead_time":"Lead Time (days)"},
                      color="is_canceled",
-                     color_discrete_map={0: "#00CC96", 1: "#EF553B"})
+                     color_discrete_map={0:"#00CC96", 1:"#EF553B"})
         fig.update_layout(showlegend=False)
         st.plotly_chart(fig, use_container_width=True)
 
     with col4:
         st.subheader("Deposit Type vs Cancellation")
-        deposit = df_raw.groupby("deposit_type")["is_canceled"].mean().reset_index()
-        deposit.columns = ["Deposit Type", "Cancellation Rate"]
+        deposit = pd.DataFrame(eda["by_deposit"].items(), columns=["Deposit Type","Cancellation Rate"])
         fig = px.bar(deposit, x="Deposit Type", y="Cancellation Rate",
                      color="Deposit Type", text_auto=".1%",
                      color_discrete_sequence=px.colors.qualitative.Set2)
         fig.update_layout(showlegend=False, yaxis_tickformat=".0%")
         st.plotly_chart(fig, use_container_width=True)
 
-    # Row 3: market segment + ADR distribution
+    # Row 3: market segment + ADR
     col5, col6 = st.columns(2)
 
     with col5:
         st.subheader("Cancellation by Market Segment")
-        seg = df_raw.groupby("market_segment")["is_canceled"].mean().sort_values(ascending=False).reset_index()
-        seg.columns = ["Market Segment", "Cancellation Rate"]
+        seg = pd.DataFrame(eda["by_segment"].items(), columns=["Market Segment","Cancellation Rate"])
+        seg = seg.sort_values("Cancellation Rate", ascending=False)
         fig = px.bar(seg, x="Cancellation Rate", y="Market Segment",
                      orientation="h", text_auto=".1%",
                      color="Cancellation Rate", color_continuous_scale="RdYlGn_r")
@@ -147,21 +120,18 @@ if page == "🏠 Overview & EDA":
 
     with col6:
         st.subheader("Average Daily Rate Distribution")
-        fig = px.histogram(df_raw[df_raw["adr"] < 500], x="adr",
-                           color="is_canceled",
-                           labels={"adr": "Average Daily Rate (£)", "is_canceled": "Cancelled"},
-                           color_discrete_map={0: "#00CC96", 1: "#EF553B"},
-                           barmode="overlay", opacity=0.7,
-                           nbins=60)
+        adr_df = pd.DataFrame(eda["adr_sample"], columns=["adr","is_canceled"])
+        fig = px.histogram(adr_df, x="adr", color="is_canceled",
+                           labels={"adr":"Average Daily Rate (£)","is_canceled":"Cancelled"},
+                           color_discrete_map={0:"#00CC96", 1:"#EF553B"},
+                           barmode="overlay", opacity=0.7, nbins=60)
         st.plotly_chart(fig, use_container_width=True)
 
-    # Top 10 guest countries
+    # Top countries
     st.subheader("Top 10 Guest Countries")
-    top_countries = df_raw[df_raw["is_canceled"]==0]["country"].value_counts().head(10).reset_index()
-    top_countries.columns = ["Country", "Bookings"]
-    fig = px.bar(top_countries, x="Country", y="Bookings",
-                 color="Bookings", color_continuous_scale="Blues",
-                 text_auto=True)
+    countries = pd.DataFrame(eda["top_countries"].items(), columns=["Country","Bookings"])
+    fig = px.bar(countries, x="Country", y="Bookings",
+                 color="Bookings", color_continuous_scale="Blues", text_auto=True)
     fig.update_layout(coloraxis_showscale=False)
     st.plotly_chart(fig, use_container_width=True)
 
