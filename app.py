@@ -55,11 +55,17 @@ def train_model(_df):
     encoders = {}
     for col in cat_cols:
         le = LabelEncoder()
-        df[col] = le.fit_transform(df[col].astype(str))
+        # Store as plain Python list to avoid Arrow dtype re-attachment
+        df[col] = le.fit_transform(df[col].astype(str)).tolist()
         encoders[col] = le
 
-    X = df.drop("is_canceled", axis=1).astype(float)
-    y = df["is_canceled"].astype(int)
+    feat_names = [c for c in df.columns if c != "is_canceled"]
+
+    # Build pure numpy arrays — bypasses all Arrow/pandas dtype issues
+    X = np.array([pd.to_numeric(df[col], errors="coerce").fillna(0).to_numpy()
+                  for col in feat_names], dtype=float).T
+    y = df["is_canceled"].to_numpy(dtype=int)
+
     X_train, _, y_train, _ = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
 
     model = HistGradientBoostingClassifier(
@@ -67,7 +73,7 @@ def train_model(_df):
         min_samples_leaf=20, l2_regularization=0.1, random_state=42
     )
     model.fit(X_train, y_train)
-    return model, list(X.columns), encoders
+    return model, feat_names, encoders
 
 df_raw = load_data()
 with st.spinner("Loading model... (first load only, ~30 seconds)"):
@@ -284,14 +290,15 @@ elif page == "🔮 Predict Cancellation":
                 else:
                     input_df[col] = le.transform([le.classes_[0]])
 
-        # Align columns and force to float (Arrow-backed pandas compatibility)
-        for col in feature_cols:
-            if col not in input_df.columns:
-                input_df[col] = 0
-        input_df = input_df[feature_cols].astype(float)
+        # Build a plain numpy array — avoids all Arrow dtype issues
+        input_arr = np.array([[
+            float(pd.to_numeric(input_df[col].iloc[0], errors="coerce") or 0)
+            if col in input_df.columns else 0.0
+            for col in feature_cols
+        ]], dtype=float)
 
-        prob       = model.predict_proba(input_df)[0][1]
-        prediction = model.predict(input_df)[0]
+        prob       = model.predict_proba(input_arr)[0][1]
+        prediction = model.predict(input_arr)[0]
 
         st.markdown("---")
         r1, r2, r3 = st.columns([1, 2, 1])
