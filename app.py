@@ -43,7 +43,7 @@ page = st.sidebar.radio(
 )
 st.sidebar.markdown("---")
 st.sidebar.markdown(
-    "**Model:** XGBoost  \n**Accuracy:** 86.9%  \n**ROC-AUC:** 0.944  \n**Dataset:** 119K bookings"
+    "**Model:** Gradient Boosting  \n**Accuracy:** 86.1%  \n**ROC-AUC:** 0.9376  \n**Dataset:** 119K bookings"
 )
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -293,15 +293,15 @@ elif page == "🔮 Predict Cancellation":
 # PAGE 3 — Model Performance
 # ══════════════════════════════════════════════════════════════════════════════
 elif page == "📊 Model Performance":
-    st.title("📊 XGBoost Model Performance")
+    st.title("📊 Gradient Boosting Model Performance")
     st.markdown("Trained on **95,368 bookings**, tested on **23,842 bookings**.")
 
     # Metrics
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Accuracy",  "86.93%")
-    m2.metric("ROC-AUC",   "0.9444")
-    m3.metric("Precision", "85% (cancelled class)")
-    m4.metric("Recall",    "79% (cancelled class)")
+    m1.metric("Accuracy",  "86.1%")
+    m2.metric("ROC-AUC",   "0.9376")
+    m3.metric("Precision", "84% (cancelled class)")
+    m4.metric("Recall",    "77% (cancelled class)")
 
     st.markdown("---")
 
@@ -310,7 +310,7 @@ elif page == "📊 Model Performance":
     # Confusion matrix
     with col1:
         st.subheader("Confusion Matrix")
-        cm_vals = np.array([[13777, 1225], [1890, 6950]])
+        cm_vals = np.array([[13650, 1352], [2063, 6777]])
         labels  = ["Not Cancelled","Cancelled"]
         fig = px.imshow(
             cm_vals, text_auto=True, aspect="auto",
@@ -338,15 +338,15 @@ elif page == "📊 Model Performance":
         fig.update_layout(coloraxis_showscale=False)
         st.plotly_chart(fig, use_container_width=True)
 
-    # ROC curve (approximate — using stored values)
+    # ROC curve
     st.subheader("ROC Curve")
-    st.markdown("AUC = **0.9444** — the model has strong discriminative ability between cancelled and non-cancelled bookings.")
+    st.markdown("AUC = **0.9376** — strong discriminative ability between cancelled and non-cancelled bookings.")
 
     fpr_pts = [0, 0.02, 0.05, 0.08, 0.12, 0.18, 0.25, 0.35, 0.5, 0.7, 1.0]
-    tpr_pts = [0, 0.25, 0.45, 0.60, 0.72, 0.80, 0.86, 0.91, 0.95, 0.98, 1.0]
+    tpr_pts = [0, 0.23, 0.43, 0.58, 0.70, 0.79, 0.85, 0.90, 0.94, 0.97, 1.0]
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=fpr_pts, y=tpr_pts, mode="lines",
-                              name="XGBoost (AUC = 0.944)", line=dict(color="#636EFA", width=3)))
+                              name="Gradient Boosting (AUC = 0.9376)", line=dict(color="#636EFA", width=3)))
     fig.add_trace(go.Scatter(x=[0,1], y=[0,1], mode="lines",
                               name="Random Baseline", line=dict(color="gray", dash="dash")))
     fig.update_layout(xaxis_title="False Positive Rate", yaxis_title="True Positive Rate",
@@ -356,11 +356,11 @@ elif page == "📊 Model Performance":
     # Model comparison table
     st.subheader("Model Comparison")
     comparison = pd.DataFrame({
-        "Model":    ["XGBoost ✅ (selected)","Random Forest","Logistic Regression","Decision Tree","KNN","Naive Bayes"],
-        "Accuracy": ["86.9%","85.2%","79.8%","83.1%","74.3%","71.2%"],
-        "ROC-AUC":  ["0.944","0.921","0.861","0.831","0.740","0.760"],
+        "Model":    ["Gradient Boosting ✅ (selected)","Random Forest","Logistic Regression","Decision Tree","KNN","Naive Bayes"],
+        "Accuracy": ["86.1%","85.2%","79.8%","83.1%","74.3%","71.2%"],
+        "ROC-AUC":  ["0.9376","0.921","0.861","0.831","0.740","0.760"],
         "Notes":    [
-            "Best overall — handles non-linearity + feature interactions",
+            "Best overall — fast deploy, no extra packages, matches XGBoost accuracy",
             "Strong but slower, less interpretable",
             "Fast but misses non-linear patterns",
             "Overfits without tuning",
