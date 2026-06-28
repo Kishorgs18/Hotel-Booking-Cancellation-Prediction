@@ -58,8 +58,8 @@ def train_model(_df):
         df[col] = le.fit_transform(df[col].astype(str))
         encoders[col] = le
 
-    X = df.drop("is_canceled", axis=1)
-    y = df["is_canceled"]
+    X = df.drop("is_canceled", axis=1).astype(float)
+    y = df["is_canceled"].astype(int)
     X_train, _, y_train, _ = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
 
     model = HistGradientBoostingClassifier(
@@ -284,11 +284,11 @@ elif page == "🔮 Predict Cancellation":
                 else:
                     input_df[col] = le.transform([le.classes_[0]])
 
-        # Align columns
+        # Align columns and force to float (Arrow-backed pandas compatibility)
         for col in feature_cols:
             if col not in input_df.columns:
                 input_df[col] = 0
-        input_df = input_df[feature_cols]
+        input_df = input_df[feature_cols].astype(float)
 
         prob       = model.predict_proba(input_df)[0][1]
         prediction = model.predict(input_df)[0]
