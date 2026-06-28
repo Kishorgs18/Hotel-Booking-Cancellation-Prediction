@@ -27,11 +27,14 @@ DROP_COLS = ["reservation_status","reservation_status_date","agent","company",
 def load_data():
     df = pd.read_parquet("hotel_bookings.parquet")
     df = df[~((df["adults"]==0)&(df["children"]==0)&(df["babies"]==0))].copy()
-    df["children"].fillna(0, inplace=True)
-    df["country"].fillna(df["country"].mode()[0], inplace=True)
-    df.fillna(0, inplace=True)
-    df["total_nights"]    = df["stays_in_week_nights"] + df["stays_in_weekend_nights"]
-    df["total_guests"]    = df["adults"] + df["children"] + df["babies"]
+    # Fill numeric and string columns separately (pandas 2.x Arrow-backed strings)
+    num_cols = df.select_dtypes(include="number").columns
+    str_cols = df.select_dtypes(include="object").columns
+    df[num_cols] = df[num_cols].fillna(0)
+    df[str_cols] = df[str_cols].fillna("Unknown")
+    df["country"] = df["country"].replace("Unknown", df["country"].mode()[0])
+    df["total_nights"] = df["stays_in_week_nights"] + df["stays_in_weekend_nights"]
+    df["total_guests"]  = df["adults"] + df["children"] + df["babies"]
     return df
 
 @st.cache_resource
