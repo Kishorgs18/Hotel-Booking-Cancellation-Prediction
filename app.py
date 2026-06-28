@@ -1,9 +1,11 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import joblib
 import plotly.express as px
 import plotly.graph_objects as go
+from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.preprocessing import LabelEncoder
+from sklearn.model_selection import train_test_split
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -14,25 +16,59 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ── Load artifacts ─────────────────────────────────────────────────────────────
-@st.cache_resource
-def load_model():
-    model    = joblib.load("model.pkl")
-    cols     = joblib.load("feature_columns.pkl")
-    encoders = joblib.load("label_encoders.pkl")
-    return model, cols, encoders
+MONTH_MAP = {m: i+1 for i, m in enumerate([
+    "January","February","March","April","May","June",
+    "July","August","September","October","November","December"
+])}
+DROP_COLS = ["reservation_status","reservation_status_date","agent","company",
+             "arrival_date_year","arrival_date_week_number","arrival_date_day_of_month"]
 
 @st.cache_data
 def load_data():
     df = pd.read_parquet("hotel_bookings.parquet")
-    df = df[~((df["adults"]==0)&(df["children"]==0)&(df["babies"]==0))]
+    df = df[~((df["adults"]==0)&(df["children"]==0)&(df["babies"]==0))].copy()
     df["children"].fillna(0, inplace=True)
-    df["total_nights"] = df["stays_in_week_nights"] + df["stays_in_weekend_nights"]
-    df["total_guests"] = df["adults"] + df["children"] + df["babies"]
+    df["country"].fillna(df["country"].mode()[0], inplace=True)
+    df.fillna(0, inplace=True)
+    df["total_nights"]    = df["stays_in_week_nights"] + df["stays_in_weekend_nights"]
+    df["total_guests"]    = df["adults"] + df["children"] + df["babies"]
     return df
 
-model, feature_cols, label_encoders = load_model()
+@st.cache_resource
+def train_model(_df):
+    df = _df.copy()
+    df.drop(columns=[c for c in DROP_COLS if c in df.columns], inplace=True)
+    df["is_family"]       = ((df["adults"]>0)&(df["children"]>0)).astype(int)
+    df["room_changed"]    = (df["reserved_room_type"]!=df["assigned_room_type"]).astype(int)
+    df["is_weekend_only"] = ((df["stays_in_weekend_nights"]>0)&(df["stays_in_week_nights"]==0)).astype(int)
+    df["revenue"]         = df["adr"] * df["total_nights"]
+    df["lead_time_log"]   = np.log1p(df["lead_time"])
+    df["adr_log"]         = np.log1p(df["adr"])
+    df["arrival_month_num"] = df["arrival_date_month"].map(MONTH_MAP)
+    df.drop(columns=["adults","children","babies","stays_in_week_nights",
+                     "stays_in_weekend_nights","lead_time","adr","arrival_date_month"], inplace=True)
+
+    cat_cols = [c for c in df.columns if df[c].dtype=="object" and c!="is_canceled"]
+    encoders = {}
+    for col in cat_cols:
+        le = LabelEncoder()
+        df[col] = le.fit_transform(df[col].astype(str))
+        encoders[col] = le
+
+    X = df.drop("is_canceled", axis=1)
+    y = df["is_canceled"]
+    X_train, _, y_train, _ = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+
+    model = HistGradientBoostingClassifier(
+        max_iter=300, max_depth=6, learning_rate=0.05,
+        min_samples_leaf=20, l2_regularization=0.1, random_state=42
+    )
+    model.fit(X_train, y_train)
+    return model, list(X.columns), encoders
+
 df_raw = load_data()
+with st.spinner("Loading model... (first load only, ~30 seconds)"):
+    model, feature_cols, label_encoders = train_model(df_raw)
 
 # ── Sidebar ────────────────────────────────────────────────────────────────────
 st.sidebar.image("https://img.icons8.com/fluency/96/hotel.png", width=80)
