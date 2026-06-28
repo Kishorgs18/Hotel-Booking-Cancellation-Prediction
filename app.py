@@ -6,6 +6,7 @@ import plotly.graph_objects as go
 from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import train_test_split
+from sklearn.inspection import permutation_importance
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -73,11 +74,19 @@ def train_model(_df):
         min_samples_leaf=20, l2_regularization=0.1, random_state=42
     )
     model.fit(X_train, y_train)
-    return model, feat_names, encoders
+
+    # Compute feature importances on a small sample (works on all sklearn versions)
+    perm = permutation_importance(
+        model, X_train[:3000], y_train[:3000],
+        n_repeats=5, random_state=42, n_jobs=-1
+    )
+    importances = dict(zip(feat_names, perm.importances_mean))
+
+    return model, feat_names, encoders, importances
 
 df_raw = load_data()
 with st.spinner("Loading model... (first load only, ~30 seconds)"):
-    model, feature_cols, label_encoders = train_model(df_raw)
+    model, feature_cols, label_encoders, feat_importances = train_model(df_raw)
 
 # ── Sidebar ────────────────────────────────────────────────────────────────────
 st.sidebar.image("https://img.icons8.com/fluency/96/hotel.png", width=80)
@@ -370,10 +379,7 @@ elif page == "📊 Model Performance":
     # Feature importance
     with col2:
         st.subheader("Top 15 Feature Importances")
-        fi = pd.Series(
-            model.feature_importances_,
-            index=feature_cols
-        ).nlargest(15).sort_values()
+        fi = pd.Series(feat_importances).nlargest(15).sort_values()
         fig = px.bar(
             x=fi.values, y=fi.index,
             orientation="h",
